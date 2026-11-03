@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 type Task struct {
@@ -18,30 +19,95 @@ var tasks = []Task{
 	{ID: 3, Title: "Build /tasks", Done: true},
 }
 
+type CreateTaskRequest struct {
+	Title string `json:"title"`
+	Done  bool   `json:"done"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+var nextID = 4
+
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, ErrorResponse{Error: message})
+}
+
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
-	json.NewEncoder(w).Encode(map[string]string{
-		"status": "ok",
-	})
+	writeJSON(
+		w,
+		http.StatusOK,
+		map[string]string{
+			"status": "ok",
+		},
+	)
 }
 
-func tasksHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+func getTasks(w http.ResponseWriter) {
+	writeJSON(
+		w,
+		http.StatusOK,
+		tasks,
+	)
+}
+
+func createTask(w http.ResponseWriter, r *http.Request) {
+	var input CreateTaskRequest
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	input.Title = strings.TrimSpace(input.Title)
 
-	json.NewEncoder(w).Encode(tasks)
+	if input.Title == "" {
+		writeError(w, http.StatusBadRequest, "Title is required")
+		return
+	}
+
+	task := Task{
+		ID:    nextID,
+		Title: input.Title,
+		Done:  input.Done,
+	}
+
+	nextID++
+
+	tasks = append(tasks, task)
+
+	writeJSON(
+		w,
+		http.StatusOK,
+		task,
+	)
+
+}
+
+func tasksHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		getTasks(w)
+	case http.MethodPost:
+		createTask(w, r)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
 }
 
 func main() {
