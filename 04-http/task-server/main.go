@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -16,7 +17,7 @@ type Task struct {
 var tasks = []Task{
 	{ID: 1, Title: "Learn net/http", Done: true},
 	{ID: 2, Title: "Build /health", Done: true},
-	{ID: 3, Title: "Build /tasks", Done: true},
+	{ID: 3, Title: "Learn Go 1.22 ServeMux", Done: false},
 }
 
 type CreateTaskRequest struct {
@@ -99,22 +100,76 @@ func createTask(w http.ResponseWriter, r *http.Request) {
 
 }
 
-func tasksHandler(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		getTasks(w)
-	case http.MethodPost:
-		createTask(w, r)
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+func getTasksHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(
+		w,
+		http.StatusOK,
+		tasks,
+	)
+}
+
+func getTaskHandler(w http.ResponseWriter, r *http.Request) {
+	idText := r.PathValue("id")
+
+	id, err := strconv.Atoi(idText)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid task ID")
+		return
 	}
+
+	for _, task := range tasks {
+		if task.ID == id {
+			writeJSON(w, http.StatusOK, task)
+			return
+		}
+	}
+
+	writeError(
+		w,
+		http.StatusNotFound,
+		"task not found",
+	)
+}
+
+func createTaskHandler(w http.ResponseWriter, r *http.Request) {
+	var input CreateTaskRequest
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	input.Title = strings.TrimSpace(input.Title)
+
+	if input.Title == "" {
+		writeError(w, http.StatusBadRequest, "Title is required")
+		return
+	}
+
+	task := Task{
+		ID:    nextID,
+		Title: input.Title,
+		Done:  input.Done,
+	}
+
+	nextID++
+
+	writeJSON(
+		w,
+		http.StatusOK,
+		task,
+	)
 }
 
 func main() {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/tasks", tasksHandler)
+	mux.HandleFunc("GET /health", healthHandler)
+	mux.HandleFunc("GET /tasks", getTasksHandler)
+	mux.HandleFunc("GET /tasks/{id}", getTaskHandler)
+	mux.HandleFunc("POST /tasks", createTaskHandler)
 
 	fmt.Println("Server running on http://localhost:8080")
 

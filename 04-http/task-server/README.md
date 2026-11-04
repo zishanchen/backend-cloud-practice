@@ -2,19 +2,17 @@
 
 A small REST-style HTTP server built with Go's standard `net/http` and `encoding/json` packages.
 
-The project started with simple `GET` endpoints and was extended with `POST /tasks` to practice JSON decoding, validation, HTTP status codes, error responses, and response encoding.
-
-## Features
+The project started with simple HTTP handlers and was gradually extended with:
 
 - `GET /health`
 - `GET /tasks`
 - `POST /tasks`
-- JSON request decoding
-- JSON response encoding
+- `GET /tasks/{id}`
+- JSON decoding and encoding
 - Input validation
-- Structured JSON error responses
-- HTTP status handling
-- Testing endpoints with `curl`
+- Structured error responses
+- Go 1.22 `ServeMux` method-based routing
+- Go 1.22 path parameters with `Request.PathValue()`
 
 ## Project Structure
 
@@ -44,9 +42,7 @@ http://localhost:8080
 
 ## `GET /health`
 
-Checks whether the HTTP service is running.
-
-Request:
+Checks whether the service is running.
 
 ```bash
 curl -i http://localhost:8080/health
@@ -65,19 +61,11 @@ Content-Type: application/json
 }
 ```
 
-Expected status:
-
-```text
-200 OK
-```
-
 ---
 
 ## `GET /tasks`
 
-Returns all tasks as JSON.
-
-Request:
+Returns all tasks.
 
 ```bash
 curl -i http://localhost:8080/tasks
@@ -99,7 +87,7 @@ Example response:
   },
   {
     "id": 3,
-    "title": "Build /tasks",
+    "title": "Learn Go 1.22 ServeMux",
     "done": false
   }
 ]
@@ -113,31 +101,92 @@ Expected status:
 
 ---
 
+## `GET /tasks/{id}`
+
+Returns one task by ID.
+
+Example:
+
+```bash
+curl -i http://localhost:8080/tasks/2
+```
+
+Example response:
+
+```json
+{
+  "id": 2,
+  "title": "Build /health",
+  "done": true
+}
+```
+
+Expected status:
+
+```text
+200 OK
+```
+
+If the task does not exist:
+
+```bash
+curl -i http://localhost:8080/tasks/99
+```
+
+Response:
+
+```json
+{
+  "error": "task not found"
+}
+```
+
+Expected status:
+
+```text
+404 Not Found
+```
+
+If the path parameter is not a valid integer:
+
+```bash
+curl -i http://localhost:8080/tasks/abc
+```
+
+Response:
+
+```json
+{
+  "error": "invalid task id"
+}
+```
+
+Expected status:
+
+```text
+400 Bad Request
+```
+
+---
+
 ## `POST /tasks`
 
 Creates a new task.
-
-Request:
 
 ```bash
 curl -i \
   -X POST \
   http://localhost:8080/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title":"Practice SQL SELECT","done":false}'
+  -d '{"title":"Practice ServeMux routing","done":false}'
 ```
 
 Example response:
 
-```text
-HTTP/1.1 201 Created
-Content-Type: application/json
-```
-
 ```json
 {
   "id": 4,
-  "title": "Practice SQL SELECT",
+  "title": "Practice ServeMux routing",
   "done": false
 }
 ```
@@ -148,19 +197,11 @@ Expected status:
 201 Created
 ```
 
-After creating the task, calling:
-
-```bash
-curl http://localhost:8080/tasks
-```
-
-returns the updated in-memory task list.
-
 ---
 
 # Validation
 
-The server validates the incoming task title.
+The task title is required.
 
 For example:
 
@@ -174,19 +215,25 @@ curl -i \
 
 Response:
 
-```text
-HTTP/1.1 400 Bad Request
-```
-
 ```json
 {
   "error": "title is required"
 }
 ```
 
-Whitespace-only titles are also rejected.
+Expected status:
 
-For example:
+```text
+400 Bad Request
+```
+
+Whitespace is removed with:
+
+```go
+strings.TrimSpace(input.Title)
+```
+
+so this is also invalid:
 
 ```json
 {
@@ -194,13 +241,11 @@ For example:
 }
 ```
 
-is treated as an empty title after `strings.TrimSpace()`.
-
 ---
 
 # Invalid JSON
 
-Malformed JSON also returns:
+Malformed JSON returns:
 
 ```text
 400 Bad Request
@@ -216,7 +261,7 @@ curl -i \
   -d '{"title":}'
 ```
 
-Example response:
+Response:
 
 ```json
 {
@@ -224,156 +269,11 @@ Example response:
 }
 ```
 
----
-
-# Unsupported HTTP Methods
-
-Only the configured HTTP methods are accepted.
-
-For example:
-
-```bash
-curl -i \
-  -X DELETE \
-  http://localhost:8080/tasks
-```
-
-returns:
-
-```text
-405 Method Not Allowed
-```
-
-with a JSON error response:
-
-```json
-{
-  "error": "method not allowed"
-}
-```
-
----
-
-# Main Data Structures
-
-## `Task`
-
-```go
-type Task struct {
-	ID    int    `json:"id"`
-	Title string `json:"title"`
-	Done  bool   `json:"done"`
-}
-```
-
-A `Task` represents the full task returned by the API.
-
-Example:
-
-```json
-{
-  "id": 4,
-  "title": "Practice SQL SELECT",
-  "done": false
-}
-```
-
-## `CreateTaskRequest`
-
-```go
-type CreateTaskRequest struct {
-	Title string `json:"title"`
-	Done  bool   `json:"done"`
-}
-```
-
-This struct represents the JSON input required to create a task.
-
-The client does not provide the task ID.
-
-The server generates it.
-
-## `ErrorResponse`
-
-```go
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-```
-
-Used to return consistent JSON error messages.
-
-Example:
-
-```json
-{
-  "error": "title is required"
-}
-```
-
----
-
-# JSON Decoder
-
-For `POST /tasks`, the request body contains JSON.
-
-The server converts it into a Go struct using:
-
-```go
-decoder := json.NewDecoder(r.Body)
-
-if err := decoder.Decode(&input); err != nil {
-	// return 400
-}
-```
-
-The flow is:
-
-```text
-HTTP request body
-        ↓
-      r.Body
-        ↓
- json.Decoder
-        ↓
-     Go struct
-```
-
-For example:
-
-```json
-{
-  "title": "Practice SQL",
-  "done": false
-}
-```
-
-becomes approximately:
-
-```go
-CreateTaskRequest{
-	Title: "Practice SQL",
-	Done:  false,
-}
-```
-
-Because `Decode()` modifies the target value, a pointer is passed:
-
-```go
-decoder.Decode(&input)
-```
-
----
-
-# Unknown JSON Fields
-
-The decoder is configured with:
+The decoder also rejects unknown fields:
 
 ```go
 decoder.DisallowUnknownFields()
 ```
-
-This makes unexpected JSON fields invalid.
 
 For example:
 
@@ -385,45 +285,280 @@ For example:
 }
 ```
 
-will be rejected because `priority` is not part of `CreateTaskRequest`.
+is rejected because `priority` is not defined in `CreateTaskRequest`.
+
+---
+
+# Go 1.22 ServeMux Routing
+
+The most important change in this version is the routing style.
+
+Previously, the route was registered only by path:
+
+```go
+mux.HandleFunc("/tasks", tasksHandler)
+```
+
+and the handler had to inspect the method:
+
+```go
+switch r.Method {
+case http.MethodGet:
+	getTasks(w)
+
+case http.MethodPost:
+	createTask(w, r)
+}
+```
+
+With Go 1.22-style `ServeMux` routing, the HTTP method can be part of the route pattern:
+
+```go
+mux.HandleFunc(
+	"GET /health",
+	healthHandler,
+)
+
+mux.HandleFunc(
+	"GET /tasks",
+	getTasksHandler,
+)
+
+mux.HandleFunc(
+	"POST /tasks",
+	createTaskHandler,
+)
+```
+
+The router now decides based on both:
+
+```text
+HTTP Method
++
+Path
+```
+
+Example:
+
+```text
+GET /tasks
+→ getTasksHandler
+
+POST /tasks
+→ createTaskHandler
+```
+
+This removes the need for a manual `switch r.Method` inside the handler.
+
+---
+
+# Path Parameters
+
+Go 1.22 `ServeMux` also supports path wildcards.
+
+The route:
+
+```go
+mux.HandleFunc(
+	"GET /tasks/{id}",
+	getTaskHandler,
+)
+```
+
+matches requests such as:
+
+```text
+GET /tasks/1
+GET /tasks/2
+GET /tasks/10
+```
+
+The path value is read with:
+
+```go
+idText := r.PathValue("id")
+```
+
+For:
+
+```text
+GET /tasks/2
+```
+
+the value is:
+
+```text
+"2"
+```
+
+It can then be converted into an integer:
+
+```go
+id, err := strconv.Atoi(idText)
+```
+
+Request flow:
+
+```text
+GET /tasks/2
+↓
+ServeMux matches /tasks/{id}
+↓
+getTaskHandler
+↓
+r.PathValue("id")
+↓
+"2"
+↓
+strconv.Atoi()
+↓
+2
+```
+
+---
+
+# Current Routes
+
+```text
+GET  /health
+GET  /tasks
+GET  /tasks/{id}
+POST /tasks
+```
+
+Routing flow:
+
+```text
+Request
+↓
+ServeMux
+↓
+Match Method + Path
+↓
+Handler
+```
+
+Example:
+
+```text
+GET /tasks
+→ getTasksHandler
+
+GET /tasks/2
+→ getTaskHandler
+
+POST /tasks
+→ createTaskHandler
+```
+
+---
+
+# JSON Decoder
+
+For `POST /tasks`, JSON from the request body is converted into a Go struct.
+
+```go
+decoder := json.NewDecoder(r.Body)
+
+if err := decoder.Decode(&input); err != nil {
+	// return 400
+}
+```
+
+Flow:
+
+```text
+HTTP request body
+↓
+r.Body
+↓
+json.Decoder
+↓
+Go struct
+```
+
+Example input:
+
+```json
+{
+  "title": "Practice Go",
+  "done": false
+}
+```
+
+becomes:
+
+```go
+CreateTaskRequest{
+	Title: "Practice Go",
+	Done:  false,
+}
+```
+
+A pointer is passed because `Decode()` must modify the struct:
+
+```go
+decoder.Decode(&input)
+```
 
 ---
 
 # JSON Encoder
 
-Responses are written using:
+Responses are converted from Go values to JSON with:
 
 ```go
 json.NewEncoder(w).Encode(data)
 ```
 
-The flow is:
+Flow:
 
 ```text
 Go value
-   ↓
+↓
 json.Encoder
-   ↓
+↓
 JSON
-   ↓
+↓
 http.ResponseWriter
-   ↓
-HTTP client
+↓
+Client
 ```
 
-A useful rule to remember is:
+The rule to remember is:
 
 ```text
 Decoder = JSON → Go
-
 Encoder = Go → JSON
 ```
 
 ---
 
-# `writeJSON`
+# Response Helpers
 
-To avoid repeating:
+## `writeJSON`
+
+The helper:
+
+```go
+func writeJSON(
+	w http.ResponseWriter,
+	status int,
+	data any,
+)
+```
+
+handles:
+
+```text
+Content-Type
++
+status code
++
+JSON body
+```
+
+Instead of repeating:
 
 ```go
 w.Header().Set("Content-Type", "application/json")
@@ -431,24 +566,7 @@ w.WriteHeader(...)
 json.NewEncoder(w).Encode(...)
 ```
 
-the project uses a helper function:
-
-```go
-func writeJSON(
-	w http.ResponseWriter,
-	status int,
-	data any,
-) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-
-	json.NewEncoder(w).Encode(data)
-}
-```
-
-This makes handlers shorter and keeps JSON responses consistent.
-
-Example:
+handlers can use:
 
 ```go
 writeJSON(
@@ -460,108 +578,35 @@ writeJSON(
 
 ---
 
-# `writeError`
+## `writeError`
 
-Error responses use another helper:
+Errors use a common response format:
 
 ```go
-func writeError(
-	w http.ResponseWriter,
-	status int,
-	message string,
-) {
-	writeJSON(
-		w,
-		status,
-		ErrorResponse{
-			Error: message,
-		},
-	)
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 ```
 
-Instead of repeating error response logic, handlers can call:
+Example:
+
+```json
+{
+  "error": "task not found"
+}
+```
+
+The helper:
 
 ```go
 writeError(
 	w,
-	http.StatusBadRequest,
-	"title is required",
+	http.StatusNotFound,
+	"task not found",
 )
 ```
 
----
-
-# Routing
-
-The server uses:
-
-```go
-mux := http.NewServeMux()
-```
-
-Routes are registered with:
-
-```go
-mux.HandleFunc("/health", healthHandler)
-mux.HandleFunc("/tasks", tasksHandler)
-```
-
-Request flow:
-
-```text
-Client
-↓
-HTTP Request
-↓
-ServeMux
-↓
-Handler
-↓
-Application Logic
-↓
-HTTP Response
-```
-
----
-
-# Handling Multiple Methods
-
-The `/tasks` endpoint supports both:
-
-```text
-GET
-POST
-```
-
-The handler uses:
-
-```go
-switch r.Method {
-case http.MethodGet:
-	getTasks(w)
-
-case http.MethodPost:
-	createTask(w, r)
-
-default:
-	writeError(
-		w,
-		http.StatusMethodNotAllowed,
-		"method not allowed",
-	)
-}
-```
-
-This separates:
-
-```text
-GET /tasks
-→ read tasks
-
-POST /tasks
-→ create task
-```
+keeps error responses consistent.
 
 ---
 
@@ -571,34 +616,30 @@ POST /tasks
 200 OK
 201 Created
 400 Bad Request
+404 Not Found
 405 Method Not Allowed
 ```
 
-Go constants:
+Corresponding Go constants include:
 
 ```go
 http.StatusOK
 http.StatusCreated
 http.StatusBadRequest
+http.StatusNotFound
 http.StatusMethodNotAllowed
-```
-
-Using named constants is clearer than writing raw numbers such as:
-
-```go
-w.WriteHeader(201)
 ```
 
 ---
 
-# Important Response Order
+# Response Order
 
-The response should normally be constructed in this order:
+The normal response order is:
 
 ```text
 1. Set headers
 2. Write status code
-3. Write response body
+3. Write body
 ```
 
 Example:
@@ -609,81 +650,116 @@ w.Header().Set(
 	"application/json",
 )
 
-w.WriteHeader(http.StatusCreated)
+w.WriteHeader(http.StatusOK)
 
-json.NewEncoder(w).Encode(task)
+json.NewEncoder(w).Encode(data)
 ```
 
-Once the response body or status has been written, changing headers may be too late.
+The `writeJSON()` helper performs these steps in the correct order.
 
 ---
 
-# Request Flow for `POST /tasks`
+# Request Flow Examples
 
-The complete flow is:
+## `GET /tasks/{id}`
 
 ```text
-Client sends POST JSON
-        ↓
-POST /tasks
-        ↓
-tasksHandler
-        ↓
-createTask
-        ↓
-json.Decoder
-        ↓
-CreateTaskRequest
-        ↓
-Validate title
-        ↓
-Generate ID
-        ↓
-Append to tasks slice
-        ↓
-json.Encoder
-        ↓
-201 Created + JSON
+curl
+↓
+GET /tasks/2
+↓
+ServeMux
+↓
+"GET /tasks/{id}"
+↓
+getTaskHandler
+↓
+PathValue("id")
+↓
+Find task
+↓
+Encoder
+↓
+200 + JSON
 ```
 
-This is the main pattern practiced in this exercise:
+## `POST /tasks`
 
 ```text
-POST JSON
-→ Decode
-→ Validate
-→ Process
-→ Encode
-→ HTTP Response
+curl
+↓
+POST /tasks
+↓
+ServeMux
+↓
+createTaskHandler
+↓
+Request Body
+↓
+Decoder
+↓
+CreateTaskRequest
+↓
+Validation
+↓
+Create Task
+↓
+Encoder
+↓
+201 + JSON
 ```
 
 ---
 
 # Test with `curl`
 
-## Health Check
+Start the server:
+
+```bash
+go run ./04-http/task-server
+```
+
+Health check:
 
 ```bash
 curl -i http://localhost:8080/health
 ```
 
-## Get Tasks
+Get all tasks:
 
 ```bash
 curl -i http://localhost:8080/tasks
 ```
 
-## Create Task
+Get one task:
+
+```bash
+curl -i http://localhost:8080/tasks/2
+```
+
+Get missing task:
+
+```bash
+curl -i http://localhost:8080/tasks/99
+```
+
+Invalid ID:
+
+```bash
+curl -i http://localhost:8080/tasks/abc
+```
+
+Create task:
 
 ```bash
 curl -i \
   -X POST \
   http://localhost:8080/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title":"Practice SQL","done":false}'
+  -d '{"title":"Practice ServeMux","done":false}'
 ```
 
-## Empty Title
+Invalid title:
 
 ```bash
 curl -i \
@@ -693,7 +769,7 @@ curl -i \
   -d '{"title":""}'
 ```
 
-## Invalid JSON
+Invalid JSON:
 
 ```bash
 curl -i \
@@ -703,7 +779,7 @@ curl -i \
   -d '{"title":}'
 ```
 
-## Unsupported Method
+Unsupported method:
 
 ```bash
 curl -i \
@@ -711,108 +787,99 @@ curl -i \
   http://localhost:8080/tasks
 ```
 
-## Only Show Status Code
-
-```bash
-curl -s \
-  -o /dev/null \
-  -w "%{http_code}\n" \
-  http://localhost:8080/tasks
-```
-
 ---
 
 # Concepts Practiced
 
-This project combines several Go topics:
+This version combines:
 
 ```text
 net/http
 encoding/json
+ServeMux
+method-based routing
+path parameters
+Request.PathValue()
+strconv.Atoi()
 structs
 slices
 JSON tags
-functions
-pointers
-error handling
-HTTP methods
-HTTP status codes
-request bodies
-response bodies
 validation
+HTTP status codes
+error responses
 curl
 ```
 
-It also introduces a basic separation of concerns:
+The project now demonstrates a more structured HTTP flow:
 
 ```text
-Routing
+Route
 ↓
 Handler
 ↓
-Validation
+Parse Input
+↓
+Validate
 ↓
 Application Logic
 ↓
-Response
+Encode Response
 ```
 
 ---
 
-# Current Limitations
+# Evolution of the Project
 
-The project intentionally remains simple.
-
-Current limitations include:
-
-- Tasks are stored only in memory.
-- Data disappears when the server restarts.
-- There is no database.
-- There is no concurrency protection around the global task slice.
-- There is no authentication.
-- There are no update or delete endpoints yet.
-- There are no automated HTTP handler tests yet.
-
-These can be added in later exercises.
-
----
-
-# Key Takeaways
-
-The most important concepts from this version are:
+The HTTP server evolved in several steps:
 
 ```text
-GET
-→ return data
-→ Encoder
-→ JSON
+Step 1
+Basic net/http server
+↓
+GET /health
+GET /tasks
 
-POST
-→ receive JSON
-→ Decoder
-→ validate
-→ create data
-→ Encoder
-→ JSON
+Step 2
+JSON Decoder / Encoder
+↓
+POST /tasks
+↓
+Validation
+↓
+Structured errors
+
+Step 3
+Go 1.22 ServeMux
+↓
+Method-based routes
+↓
+GET /tasks/{id}
+↓
+PathValue("id")
 ```
 
-And the main rule to remember:
+The main routing improvement is:
 
 ```text
-Decoder = JSON → Go
-Encoder = Go → JSON
+Before
+
+"/tasks"
+↓
+tasksHandler
+↓
+switch r.Method
 ```
 
-The complete request lifecycle is:
+becoming:
 
 ```text
-curl
-→ HTTP request
-→ ServeMux
-→ Handler
-→ Decode
-→ Validate
-→ Process
-→ Encode
-→ Status + JSON response
-```
+Now
+
+"GET /tasks"
+→ getTasksHandler
+
+"POST /tasks"
+→ createTaskHandler
+
+"GET /tasks/{id}"
+→
