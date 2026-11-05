@@ -3,8 +3,8 @@ package main
 import (
 	"fmt"
 
-	"github.com/zishanchen/study-go/01-basics/packages/mathutil"
-	"github.com/zishanchen/study-go/01-basics/packages/stringutil"
+	"github.com/zishanchen/backend-cloud-practice/01-go/02-packages-testing/packages/mathutil"
+	"github.com/zishanchen/backend-cloud-practice/01-go/02-packages-testing/packages/stringutil"
 )
 
 func main() {

@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/zishanchen/study-go/01-basics/visibility/person"
+	"github.com/zishanchen/backend-cloud-practice/01-go/02-packages-testing/visibility/person"
 )
 
 func main() {
