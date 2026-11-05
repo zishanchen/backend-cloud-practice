@@ -1,0 +1,19 @@
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Go binaries and test output
+*.exe
+*.out
+*.test
+
+# Temporary files
+*.tmp
+
+# OS files
+.DS_Store
+
+# Editors / IDEs
+.vscode/
+.idea/
