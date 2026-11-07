@@ -1,24 +1,25 @@
 # Go Task HTTP Server
 
-A small REST-style HTTP server built with Go's standard `net/http` and `encoding/json` packages.
+A small REST-style HTTP server built with Go's standard library.
 
-The project started with simple HTTP handlers and was gradually extended with:
+The project gradually evolved from basic `net/http` handlers into a more structured HTTP service with:
 
-- `GET /health`
-- `GET /tasks`
-- `POST /tasks`
-- `GET /tasks/{id}`
-- JSON decoding and encoding
+- Go 1.22 `ServeMux` routing
+- JSON request and response handling
 - Input validation
+- Path parameters
 - Structured error responses
-- Go 1.22 `ServeMux` method-based routing
-- Go 1.22 path parameters with `Request.PathValue()`
+- Request ID middleware
+- Logging middleware
+- HTTP status tracking
+- Basic request tracing
 
 ## Project Structure
 
 ```text
-task-server/
+03-task-server/
 ├── main.go
+├── middleware.go
 └── README.md
 ```
 
@@ -27,7 +28,7 @@ task-server/
 From the repository root:
 
 ```bash
-go run ./04-http/task-server
+go run ./01-go/04-http/03-task-server
 ```
 
 The server starts at:
@@ -50,15 +51,16 @@ curl -i http://localhost:8080/health
 
 Example response:
 
-```text
-HTTP/1.1 200 OK
-Content-Type: application/json
-```
-
 ```json
 {
   "status": "ok"
 }
+```
+
+Expected status:
+
+```text
+200 OK
 ```
 
 ---
@@ -105,8 +107,6 @@ Expected status:
 
 Returns one task by ID.
 
-Example:
-
 ```bash
 curl -i http://localhost:8080/tasks/2
 ```
@@ -119,12 +119,6 @@ Example response:
   "title": "Build /health",
   "done": true
 }
-```
-
-Expected status:
-
-```text
-200 OK
 ```
 
 If the task does not exist:
@@ -147,18 +141,10 @@ Expected status:
 404 Not Found
 ```
 
-If the path parameter is not a valid integer:
+If the ID is invalid:
 
 ```bash
 curl -i http://localhost:8080/tasks/abc
-```
-
-Response:
-
-```json
-{
-  "error": "invalid task id"
-}
 ```
 
 Expected status:
@@ -178,7 +164,7 @@ curl -i \
   -X POST \
   http://localhost:8080/tasks \
   -H "Content-Type: application/json" \
-  -d '{"title":"Practice ServeMux routing","done":false}'
+  -d '{"title":"Practice middleware","done":false}'
 ```
 
 Example response:
@@ -186,7 +172,7 @@ Example response:
 ```json
 {
   "id": 4,
-  "title": "Practice ServeMux routing",
+  "title": "Practice middleware",
   "done": false
 }
 ```
@@ -199,119 +185,9 @@ Expected status:
 
 ---
 
-# Validation
-
-The task title is required.
-
-For example:
-
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":""}'
-```
-
-Response:
-
-```json
-{
-  "error": "title is required"
-}
-```
-
-Expected status:
-
-```text
-400 Bad Request
-```
-
-Whitespace is removed with:
-
-```go
-strings.TrimSpace(input.Title)
-```
-
-so this is also invalid:
-
-```json
-{
-  "title": "   "
-}
-```
-
----
-
-# Invalid JSON
-
-Malformed JSON returns:
-
-```text
-400 Bad Request
-```
-
-Example:
-
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":}'
-```
-
-Response:
-
-```json
-{
-  "error": "invalid JSON body"
-}
-```
-
-The decoder also rejects unknown fields:
-
-```go
-decoder.DisallowUnknownFields()
-```
-
-For example:
-
-```json
-{
-  "title": "Learn Go",
-  "done": false,
-  "priority": 5
-}
-```
-
-is rejected because `priority` is not defined in `CreateTaskRequest`.
-
----
-
 # Go 1.22 ServeMux Routing
 
-The most important change in this version is the routing style.
-
-Previously, the route was registered only by path:
-
-```go
-mux.HandleFunc("/tasks", tasksHandler)
-```
-
-and the handler had to inspect the method:
-
-```go
-switch r.Method {
-case http.MethodGet:
-	getTasks(w)
-
-case http.MethodPost:
-	createTask(w, r)
-}
-```
-
-With Go 1.22-style `ServeMux` routing, the HTTP method can be part of the route pattern:
+Routes are registered using both the HTTP method and path:
 
 ```go
 mux.HandleFunc(
@@ -325,12 +201,17 @@ mux.HandleFunc(
 )
 
 mux.HandleFunc(
+	"GET /tasks/{id}",
+	getTaskHandler,
+)
+
+mux.HandleFunc(
 	"POST /tasks",
 	createTaskHandler,
 )
 ```
 
-The router now decides based on both:
+This means routing is based on:
 
 ```text
 HTTP Method
@@ -338,7 +219,7 @@ HTTP Method
 Path
 ```
 
-Example:
+For example:
 
 ```text
 GET /tasks
@@ -346,34 +227,34 @@ GET /tasks
 
 POST /tasks
 → createTaskHandler
+
+GET /tasks/2
+→ getTaskHandler
 ```
 
-This removes the need for a manual `switch r.Method` inside the handler.
+This removes the need to manually write:
+
+```go
+switch r.Method {
+...
+}
+```
+
+inside a shared handler.
 
 ---
 
 # Path Parameters
 
-Go 1.22 `ServeMux` also supports path wildcards.
-
 The route:
 
 ```go
-mux.HandleFunc(
-	"GET /tasks/{id}",
-	getTaskHandler,
-)
+"GET /tasks/{id}"
 ```
 
-matches requests such as:
+contains a path wildcard.
 
-```text
-GET /tasks/1
-GET /tasks/2
-GET /tasks/10
-```
-
-The path value is read with:
+The value is read with:
 
 ```go
 idText := r.PathValue("id")
@@ -391,7 +272,7 @@ the value is:
 "2"
 ```
 
-It can then be converted into an integer:
+It is converted to an integer with:
 
 ```go
 id, err := strconv.Atoi(idText)
@@ -402,11 +283,11 @@ Request flow:
 ```text
 GET /tasks/2
 ↓
-ServeMux matches /tasks/{id}
+ServeMux
 ↓
-getTaskHandler
+GET /tasks/{id}
 ↓
-r.PathValue("id")
+PathValue("id")
 ↓
 "2"
 ↓
@@ -417,51 +298,16 @@ strconv.Atoi()
 
 ---
 
-# Current Routes
-
-```text
-GET  /health
-GET  /tasks
-GET  /tasks/{id}
-POST /tasks
-```
-
-Routing flow:
-
-```text
-Request
-↓
-ServeMux
-↓
-Match Method + Path
-↓
-Handler
-```
-
-Example:
-
-```text
-GET /tasks
-→ getTasksHandler
-
-GET /tasks/2
-→ getTaskHandler
-
-POST /tasks
-→ createTaskHandler
-```
-
----
-
 # JSON Decoder
 
-For `POST /tasks`, JSON from the request body is converted into a Go struct.
+For `POST /tasks`, the request body contains JSON.
 
 ```go
 decoder := json.NewDecoder(r.Body)
+decoder.DisallowUnknownFields()
 
 if err := decoder.Decode(&input); err != nil {
-	// return 400
+	...
 }
 ```
 
@@ -477,7 +323,7 @@ json.Decoder
 Go struct
 ```
 
-Example input:
+Example:
 
 ```json
 {
@@ -486,7 +332,7 @@ Example input:
 }
 ```
 
-becomes:
+becomes approximately:
 
 ```go
 CreateTaskRequest{
@@ -495,17 +341,17 @@ CreateTaskRequest{
 }
 ```
 
-A pointer is passed because `Decode()` must modify the struct:
+Remember:
 
-```go
-decoder.Decode(&input)
+```text
+Decoder = JSON → Go
 ```
 
 ---
 
 # JSON Encoder
 
-Responses are converted from Go values to JSON with:
+Responses are written with:
 
 ```go
 json.NewEncoder(w).Encode(data)
@@ -520,16 +366,48 @@ json.Encoder
 ↓
 JSON
 ↓
-http.ResponseWriter
-↓
-Client
+HTTP response
 ```
 
-The rule to remember is:
+Remember:
 
 ```text
-Decoder = JSON → Go
 Encoder = Go → JSON
+```
+
+---
+
+# Validation
+
+The task title must not be empty.
+
+```go
+input.Title = strings.TrimSpace(input.Title)
+
+if input.Title == "" {
+	writeError(
+		w,
+		http.StatusBadRequest,
+		"title is required",
+	)
+	return
+}
+```
+
+Example invalid request:
+
+```bash
+curl -i \
+  -X POST \
+  http://localhost:8080/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":""}'
+```
+
+Expected status:
+
+```text
+400 Bad Request
 ```
 
 ---
@@ -538,35 +416,17 @@ Encoder = Go → JSON
 
 ## `writeJSON`
 
-The helper:
-
-```go
-func writeJSON(
-	w http.ResponseWriter,
-	status int,
-	data any,
-)
-```
-
-handles:
+The helper centralizes:
 
 ```text
 Content-Type
 +
-status code
+HTTP status
 +
-JSON body
+JSON encoding
 ```
 
-Instead of repeating:
-
-```go
-w.Header().Set("Content-Type", "application/json")
-w.WriteHeader(...)
-json.NewEncoder(w).Encode(...)
-```
-
-handlers can use:
+Example:
 
 ```go
 writeJSON(
@@ -580,15 +440,7 @@ writeJSON(
 
 ## `writeError`
 
-Errors use a common response format:
-
-```go
-type ErrorResponse struct {
-	Error string `json:"error"`
-}
-```
-
-Example:
+Errors use a consistent JSON format:
 
 ```json
 {
@@ -596,7 +448,7 @@ Example:
 }
 ```
 
-The helper:
+Example:
 
 ```go
 writeError(
@@ -606,7 +458,350 @@ writeError(
 )
 ```
 
-keeps error responses consistent.
+---
+
+# Middleware
+
+Middleware is reusable logic that wraps an `http.Handler`.
+
+The core pattern is:
+
+```go
+func middleware(
+	next http.Handler,
+) http.Handler {
+
+	return http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			// before
+
+			next.ServeHTTP(w, r)
+
+			// after
+		},
+	)
+}
+```
+
+The most important line is:
+
+```go
+next.ServeHTTP(w, r)
+```
+
+It passes the request to the next handler in the chain.
+
+A middleware can run logic:
+
+```text
+before the handler
++
+after the handler
+```
+
+Typical use cases include:
+
+```text
+logging
+request IDs
+authentication
+authorization
+metrics
+CORS
+rate limiting
+panic recovery
+```
+
+---
+
+# Middleware Chain
+
+The task server currently wraps the router like this:
+
+```go
+handler := requestIDMiddleware(
+	loggingMiddleware(
+		mux,
+	),
+)
+```
+
+Structure:
+
+```text
+requestIDMiddleware
+└── loggingMiddleware
+    └── ServeMux
+```
+
+Request flow:
+
+```text
+Client
+↓
+requestIDMiddleware
+↓
+loggingMiddleware
+↓
+ServeMux
+↓
+Route Handler
+↓
+Response
+```
+
+---
+
+# Request ID Middleware
+
+Each request receives a request ID.
+
+The middleware first checks:
+
+```go
+r.Header.Get("X-Request-ID")
+```
+
+If the client did not provide one, the server generates one.
+
+Example:
+
+```text
+req-1
+req-2
+req-3
+```
+
+The request ID is also returned in the response header:
+
+```text
+X-Request-ID: req-1
+```
+
+This helps correlate:
+
+```text
+request
+↔
+server logs
+↔
+response
+```
+
+---
+
+# Request Context
+
+The request ID is stored in the request context:
+
+```go
+ctx := context.WithValue(
+	r.Context(),
+	requestIDKey,
+	requestID,
+)
+```
+
+The modified request is passed downstream:
+
+```go
+next.ServeHTTP(
+	w,
+	r.WithContext(ctx),
+)
+```
+
+Later middleware or handlers can retrieve the same request ID.
+
+This is useful because request-specific data should not normally be stored in global variables.
+
+Examples of request-specific context data:
+
+```text
+request ID
+trace ID
+authenticated user
+deadline
+cancellation
+```
+
+---
+
+# Logging Middleware
+
+The logging middleware measures request duration and records request information.
+
+Example log:
+
+```text
+request_id=req-3 method=GET path=/tasks/2 status=200 duration=95µs
+```
+
+Fields:
+
+```text
+request_id
+→ identifies the request
+
+method
+→ GET / POST / ...
+
+path
+→ requested endpoint
+
+status
+→ HTTP response status
+
+duration
+→ request processing time
+```
+
+The basic flow is:
+
+```text
+record start time
+↓
+next.ServeHTTP()
+↓
+handler executes
+↓
+record status
+↓
+calculate duration
+↓
+write log
+```
+
+---
+
+# Response Recorder
+
+The logging middleware needs to know which status code the handler returned.
+
+For that reason, `http.ResponseWriter` is wrapped:
+
+```go
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+}
+```
+
+The wrapper intercepts:
+
+```go
+WriteHeader(status)
+```
+
+Example:
+
+```go
+func (rec *responseRecorder) WriteHeader(status int) {
+	rec.status = status
+	rec.ResponseWriter.WriteHeader(status)
+}
+```
+
+This allows the logging middleware to record:
+
+```text
+200
+201
+400
+404
+```
+
+after the handler finishes.
+
+---
+
+# Why Middleware Order Matters
+
+Current order:
+
+```text
+request ID
+↓
+logging
+↓
+router
+```
+
+This allows the logging middleware to access the request ID that was created earlier.
+
+Conceptually:
+
+```text
+request
+↓
+requestIDMiddleware
+    create request ID
+↓
+loggingMiddleware
+    read request ID
+↓
+handler
+```
+
+Middleware order can change behavior, so wrapper order matters.
+
+---
+
+# Test Middleware
+
+Start the server:
+
+```bash
+go run ./01-go/04-http/03-task-server
+```
+
+Test normal request:
+
+```bash
+curl -i http://localhost:8080/tasks
+```
+
+The response should contain:
+
+```text
+X-Request-Id: req-1
+```
+
+Test another request:
+
+```bash
+curl -i http://localhost:8080/tasks/2
+```
+
+The server log should contain something similar to:
+
+```text
+request_id=req-2 method=GET path=/tasks/2 status=200 duration=...
+```
+
+---
+
+# Custom Request ID
+
+A client can provide its own request ID:
+
+```bash
+curl -i \
+  -H "X-Request-ID: test-123" \
+  http://localhost:8080/tasks
+```
+
+The response should contain:
+
+```text
+X-Request-Id: test-123
+```
+
+The server log should contain:
+
+```text
+request_id=test-123 method=GET path=/tasks status=200 duration=...
+```
 
 ---
 
@@ -620,7 +815,7 @@ keeps error responses consistent.
 405 Method Not Allowed
 ```
 
-Corresponding Go constants include:
+Go constants include:
 
 ```go
 http.StatusOK
@@ -632,205 +827,102 @@ http.StatusMethodNotAllowed
 
 ---
 
-# Response Order
+# Full Request Lifecycle
 
-The normal response order is:
-
-```text
-1. Set headers
-2. Write status code
-3. Write body
-```
-
-Example:
-
-```go
-w.Header().Set(
-	"Content-Type",
-	"application/json",
-)
-
-w.WriteHeader(http.StatusOK)
-
-json.NewEncoder(w).Encode(data)
-```
-
-The `writeJSON()` helper performs these steps in the correct order.
-
----
-
-# Request Flow Examples
-
-## `GET /tasks/{id}`
+A `GET /tasks/2` request now follows:
 
 ```text
 curl
 ↓
-GET /tasks/2
+HTTP request
+↓
+requestIDMiddleware
+↓
+loggingMiddleware
 ↓
 ServeMux
 ↓
-"GET /tasks/{id}"
+GET /tasks/{id}
 ↓
 getTaskHandler
 ↓
 PathValue("id")
 ↓
-Find task
+application logic
 ↓
-Encoder
+writeJSON
 ↓
-200 + JSON
+responseRecorder
+↓
+logging
+↓
+HTTP response
 ```
 
-## `POST /tasks`
+For `POST /tasks`:
 
 ```text
 curl
 ↓
 POST /tasks
 ↓
+request ID
+↓
+logging
+↓
 ServeMux
 ↓
 createTaskHandler
 ↓
-Request Body
+JSON Decoder
 ↓
-Decoder
+validation
 ↓
-CreateTaskRequest
+create task
 ↓
-Validation
+JSON Encoder
 ↓
-Create Task
+201 Created
 ↓
-Encoder
+logging
 ↓
-201 + JSON
-```
-
----
-
-# Test with `curl`
-
-Start the server:
-
-```bash
-go run ./04-http/task-server
-```
-
-Health check:
-
-```bash
-curl -i http://localhost:8080/health
-```
-
-Get all tasks:
-
-```bash
-curl -i http://localhost:8080/tasks
-```
-
-Get one task:
-
-```bash
-curl -i http://localhost:8080/tasks/2
-```
-
-Get missing task:
-
-```bash
-curl -i http://localhost:8080/tasks/99
-```
-
-Invalid ID:
-
-```bash
-curl -i http://localhost:8080/tasks/abc
-```
-
-Create task:
-
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Practice ServeMux","done":false}'
-```
-
-Invalid title:
-
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":""}'
-```
-
-Invalid JSON:
-
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":}'
-```
-
-Unsupported method:
-
-```bash
-curl -i \
-  -X DELETE \
-  http://localhost:8080/tasks
+response
 ```
 
 ---
 
 # Concepts Practiced
 
-This version combines:
+This project currently practices:
 
 ```text
 net/http
-encoding/json
 ServeMux
-method-based routing
+Go 1.22 routing
+HTTP methods
 path parameters
 Request.PathValue()
-strconv.Atoi()
-structs
-slices
-JSON tags
+encoding/json
+JSON Decoder
+JSON Encoder
 validation
 HTTP status codes
-error responses
+structured errors
+http.Handler
+http.HandlerFunc
+middleware
+handler wrapping
+request context
+request IDs
+logging
+response writer wrapping
+request duration
 curl
-```
-
-The project now demonstrates a more structured HTTP flow:
-
-```text
-Route
-↓
-Handler
-↓
-Parse Input
-↓
-Validate
-↓
-Application Logic
-↓
-Encode Response
 ```
 
 ---
 
-# Evolution of the Project
-
-The HTTP server evolved in several steps:
+# Project Evolution
 
 ```text
 Step 1
@@ -844,42 +936,120 @@ JSON Decoder / Encoder
 ↓
 POST /tasks
 ↓
-Validation
+validation
 ↓
-Structured errors
+structured errors
 
 Step 3
 Go 1.22 ServeMux
 ↓
-Method-based routes
+method-based routes
 ↓
 GET /tasks/{id}
 ↓
-PathValue("id")
+PathValue()
+
+Step 4
+Middleware
+↓
+request ID
+↓
+logging
+↓
+status tracking
+↓
+request duration
 ```
 
-The main routing improvement is:
+---
+
+# Current Limitations
+
+The project intentionally remains simple.
+
+Current limitations:
+
+- Tasks are stored only in memory.
+- Data disappears when the server restarts.
+- There is no database integration yet.
+- The global task slice has no concurrency protection.
+- There is no authentication.
+- There are no update or delete endpoints.
+- There are no automated HTTP handler tests yet.
+- Request IDs are locally generated rather than using a distributed tracing system.
+
+These can be introduced in later exercises.
+
+---
+
+# Key Takeaways
+
+## Routing
 
 ```text
-Before
-
-"/tasks"
-↓
-tasksHandler
-↓
-switch r.Method
+METHOD + PATH
+→ Handler
 ```
 
-becoming:
+Example:
 
 ```text
-Now
-
-"GET /tasks"
+GET /tasks
 → getTasksHandler
 
-"POST /tasks"
+POST /tasks
 → createTaskHandler
 
-"GET /tasks/{id}"
-→
+GET /tasks/{id}
+→ getTaskHandler
+```
+
+## JSON
+
+```text
+Decoder = JSON → Go
+
+Encoder = Go → JSON
+```
+
+## Middleware
+
+```text
+Middleware receives a Handler
+↓
+wraps it
+↓
+returns another Handler
+```
+
+Core signature:
+
+```go
+func(http.Handler) http.Handler
+```
+
+Core call:
+
+```go
+next.ServeHTTP(w, r)
+```
+
+Current request flow:
+
+```text
+request
+↓
+request ID middleware
+↓
+logging middleware
+↓
+ServeMux
+↓
+handler
+↓
+response
+```
+
+The main idea to remember is:
+
+> Middleware is reusable logic that wraps HTTP handlers and runs before and/or after the actual handler.
