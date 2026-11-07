@@ -166,14 +166,38 @@ func createTaskHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", healthHandler)
-	mux.HandleFunc("GET /tasks", getTasksHandler)
-	mux.HandleFunc("GET /tasks/{id}", getTaskHandler)
-	mux.HandleFunc("POST /tasks", createTaskHandler)
+	mux.HandleFunc(
+		"GET /health",
+		healthHandler,
+	)
 
-	fmt.Println("Server running on http://localhost:8080")
+	mux.HandleFunc(
+		"GET /tasks",
+		getTasksHandler,
+	)
 
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		fmt.Println("Error starting server:", err)
+	mux.HandleFunc(
+		"GET /tasks/{id}",
+		getTaskHandler,
+	)
+
+	mux.HandleFunc(
+		"POST /tasks",
+		createTaskHandler,
+	)
+
+	handler := requestIDMiddleware(
+		loggingMiddleware(mux),
+	)
+
+	fmt.Println(
+		"Server running on http://localhost:8080",
+	)
+
+	if err := http.ListenAndServe(
+		":8080",
+		handler,
+	); err != nil {
+		fmt.Println("Server error:", err)
 	}
 }
