@@ -163,6 +163,41 @@ func createTaskHandler(w http.ResponseWriter, r *http.Request) {
 	)
 }
 
+func deleteTaskHandler(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	idText := r.PathValue("id")
+
+	id, err := strconv.Atoi(idText)
+	if err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"invalid task id",
+		)
+		return
+	}
+
+	for i, task := range tasks {
+		if task.ID == id {
+			tasks = append(
+				tasks[:i],
+				tasks[i+1:]...,
+			)
+
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+	}
+
+	writeError(
+		w,
+		http.StatusNotFound,
+		"task not found",
+	)
+}
+
 func main() {
 	mux := http.NewServeMux()
 
@@ -184,6 +219,11 @@ func main() {
 	mux.HandleFunc(
 		"POST /tasks",
 		createTaskHandler,
+	)
+
+	mux.HandleFunc(
+		"DELETE /tasks/{id}",
+		deleteTaskHandler,
 	)
 
 	handler := requestIDMiddleware(

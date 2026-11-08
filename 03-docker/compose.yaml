@@ -1,0 +1,26 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: task-postgres
+
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: taskdb
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - task-postgres-data:/var/lib/postgresql/data
+      - ../02-sql/task-system-schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../02-sql/task-system-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg-isready -U app -d taskdb" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  task-postgres-data:

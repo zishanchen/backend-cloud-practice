@@ -11,10 +11,10 @@ CREATE TABLE users (
 
 CREATE TABLE tasks (
     id INTEGER PRIMARY KEY,
-    task_id INTEGER NOT NULL,
-    status TEXT,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
     user_id INTEGER NOT NULL,
-    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
@@ -24,7 +24,7 @@ CREATE TABLE status_history (
     old_status TEXT,
     new_status TEXT NOT NULL,
     changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+    FOREIGN KEY (task_id) REFERENCES tasks(id)
 );
 
 CREATE TABLE audit_logs (
