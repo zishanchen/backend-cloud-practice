@@ -2,9 +2,10 @@
 
 A small REST-style HTTP server built with Go's standard library.
 
-The project gradually evolved from basic `net/http` handlers into a more structured HTTP service with:
+The project gradually evolved from basic `net/http` handlers into a more structured in-memory HTTP API with:
 
 - Go 1.22 `ServeMux` routing
+- 5 HTTP endpoints
 - JSON request and response handling
 - Input validation
 - Path parameters
@@ -40,6 +41,18 @@ http://localhost:8080
 ---
 
 # API Endpoints
+
+The current in-memory API provides 5 endpoints:
+
+```text
+GET     /health
+GET     /tasks
+GET     /tasks/{id}
+POST    /tasks
+DELETE  /tasks/{id}
+```
+
+---
 
 ## `GET /health`
 
@@ -183,6 +196,82 @@ Expected status:
 201 Created
 ```
 
+Invalid request:
+
+```bash
+curl -i \
+  -X POST \
+  http://localhost:8080/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":""}'
+```
+
+Expected status:
+
+```text
+400 Bad Request
+```
+
+---
+
+## `DELETE /tasks/{id}`
+
+Deletes a task by ID.
+
+```bash
+curl -i \
+  -X DELETE \
+  http://localhost:8080/tasks/2
+```
+
+Expected status:
+
+```text
+204 No Content
+```
+
+A successful delete returns no response body.
+
+Verify that the task was removed:
+
+```bash
+curl -i http://localhost:8080/tasks/2
+```
+
+Expected result:
+
+```text
+404 Not Found
+```
+
+If the task does not exist:
+
+```bash
+curl -i \
+  -X DELETE \
+  http://localhost:8080/tasks/99
+```
+
+Expected status:
+
+```text
+404 Not Found
+```
+
+If the ID is invalid:
+
+```bash
+curl -i \
+  -X DELETE \
+  http://localhost:8080/tasks/abc
+```
+
+Expected status:
+
+```text
+400 Bad Request
+```
+
 ---
 
 # Go 1.22 ServeMux Routing
@@ -209,9 +298,14 @@ mux.HandleFunc(
 	"POST /tasks",
 	createTaskHandler,
 )
+
+mux.HandleFunc(
+	"DELETE /tasks/{id}",
+	deleteTaskHandler,
+)
 ```
 
-This means routing is based on:
+Routing is based on:
 
 ```text
 HTTP Method
@@ -230,9 +324,12 @@ POST /tasks
 
 GET /tasks/2
 → getTaskHandler
+
+DELETE /tasks/2
+→ deleteTaskHandler
 ```
 
-This removes the need to manually write:
+This avoids manually switching on:
 
 ```go
 switch r.Method {
@@ -246,13 +343,14 @@ inside a shared handler.
 
 # Path Parameters
 
-The route:
+Both:
 
-```go
-"GET /tasks/{id}"
+```text
+GET /tasks/{id}
+DELETE /tasks/{id}
 ```
 
-contains a path wildcard.
+use a path parameter.
 
 The value is read with:
 
@@ -263,7 +361,7 @@ idText := r.PathValue("id")
 For:
 
 ```text
-GET /tasks/2
+DELETE /tasks/2
 ```
 
 the value is:
@@ -278,14 +376,14 @@ It is converted to an integer with:
 id, err := strconv.Atoi(idText)
 ```
 
-Request flow:
+Flow:
 
 ```text
-GET /tasks/2
+DELETE /tasks/2
 ↓
 ServeMux
 ↓
-GET /tasks/{id}
+DELETE /tasks/{id}
 ↓
 PathValue("id")
 ↓
@@ -295,6 +393,56 @@ strconv.Atoi()
 ↓
 2
 ```
+
+---
+
+# In-Memory Storage
+
+Tasks are currently stored in a Go slice:
+
+```go
+var tasks = []Task{
+	...
+}
+```
+
+This means the API does not yet use a database.
+
+Operations modify the slice directly:
+
+```text
+GET
+→ read tasks
+
+POST
+→ append task
+
+DELETE
+→ remove task from slice
+```
+
+Example delete operation:
+
+```go
+tasks = append(
+	tasks[:i],
+	tasks[i+1:]...,
+)
+```
+
+This joins:
+
+```text
+everything before index i
++
+everything after index i
+```
+
+and removes the matching task.
+
+The data exists only while the Go process is running.
+
+Restarting the server resets the in-memory data.
 
 ---
 
@@ -394,20 +542,19 @@ if input.Title == "" {
 }
 ```
 
-Example invalid request:
+Task IDs are also validated:
 
-```bash
-curl -i \
-  -X POST \
-  http://localhost:8080/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title":""}'
-```
+```go
+id, err := strconv.Atoi(idText)
 
-Expected status:
-
-```text
-400 Bad Request
+if err != nil {
+	writeError(
+		w,
+		http.StatusBadRequest,
+		"invalid task id",
+	)
+	return
+}
 ```
 
 ---
@@ -435,8 +582,6 @@ writeJSON(
 	tasks,
 )
 ```
-
----
 
 ## `writeError`
 
@@ -491,15 +636,7 @@ next.ServeHTTP(w, r)
 
 It passes the request to the next handler in the chain.
 
-A middleware can run logic:
-
-```text
-before the handler
-+
-after the handler
-```
-
-Typical use cases include:
+Typical middleware use cases include:
 
 ```text
 logging
@@ -516,7 +653,7 @@ panic recovery
 
 # Middleware Chain
 
-The task server currently wraps the router like this:
+The task server wraps the router like this:
 
 ```go
 handler := requestIDMiddleware(
@@ -578,7 +715,7 @@ The request ID is also returned in the response header:
 X-Request-ID: req-1
 ```
 
-This helps correlate:
+This allows correlation between:
 
 ```text
 request
@@ -613,9 +750,7 @@ next.ServeHTTP(
 
 Later middleware or handlers can retrieve the same request ID.
 
-This is useful because request-specific data should not normally be stored in global variables.
-
-Examples of request-specific context data:
+Typical request-specific context values include:
 
 ```text
 request ID
@@ -631,10 +766,16 @@ cancellation
 
 The logging middleware measures request duration and records request information.
 
-Example log:
+Example:
 
 ```text
 request_id=req-3 method=GET path=/tasks/2 status=200 duration=95µs
+```
+
+A DELETE request might produce:
+
+```text
+request_id=req-4 method=DELETE path=/tasks/2 status=204 duration=80µs
 ```
 
 Fields:
@@ -644,7 +785,7 @@ request_id
 → identifies the request
 
 method
-→ GET / POST / ...
+→ GET / POST / DELETE / ...
 
 path
 → requested endpoint
@@ -656,7 +797,7 @@ duration
 → request processing time
 ```
 
-The basic flow is:
+Basic flow:
 
 ```text
 record start time
@@ -678,7 +819,7 @@ write log
 
 The logging middleware needs to know which status code the handler returned.
 
-For that reason, `http.ResponseWriter` is wrapped:
+`http.ResponseWriter` is wrapped:
 
 ```go
 type responseRecorder struct {
@@ -690,28 +831,22 @@ type responseRecorder struct {
 The wrapper intercepts:
 
 ```go
-WriteHeader(status)
-```
-
-Example:
-
-```go
 func (rec *responseRecorder) WriteHeader(status int) {
 	rec.status = status
 	rec.ResponseWriter.WriteHeader(status)
 }
 ```
 
-This allows the logging middleware to record:
+This allows the logging middleware to record statuses such as:
 
 ```text
 200
 201
+204
 400
 404
+405
 ```
-
-after the handler finishes.
 
 ---
 
@@ -727,9 +862,7 @@ logging
 router
 ```
 
-This allows the logging middleware to access the request ID that was created earlier.
-
-Conceptually:
+The request ID middleware runs first, so the logging middleware can read the generated request ID.
 
 ```text
 request
@@ -743,7 +876,7 @@ loggingMiddleware
 handler
 ```
 
-Middleware order can change behavior, so wrapper order matters.
+Middleware order can change behavior.
 
 ---
 
@@ -755,28 +888,30 @@ Start the server:
 go run ./01-go/04-http/03-task-server
 ```
 
-Test normal request:
+Normal request:
 
 ```bash
 curl -i http://localhost:8080/tasks
 ```
 
-The response should contain:
+Response header:
 
 ```text
 X-Request-Id: req-1
 ```
 
-Test another request:
+Test DELETE:
 
 ```bash
-curl -i http://localhost:8080/tasks/2
+curl -i \
+  -X DELETE \
+  http://localhost:8080/tasks/2
 ```
 
-The server log should contain something similar to:
+Server log:
 
 ```text
-request_id=req-2 method=GET path=/tasks/2 status=200 duration=...
+request_id=req-2 method=DELETE path=/tasks/2 status=204 duration=...
 ```
 
 ---
@@ -791,13 +926,13 @@ curl -i \
   http://localhost:8080/tasks
 ```
 
-The response should contain:
+Response:
 
 ```text
 X-Request-Id: test-123
 ```
 
-The server log should contain:
+Log:
 
 ```text
 request_id=test-123 method=GET path=/tasks status=200 duration=...
@@ -810,6 +945,7 @@ request_id=test-123 method=GET path=/tasks status=200 duration=...
 ```text
 200 OK
 201 Created
+204 No Content
 400 Bad Request
 404 Not Found
 405 Method Not Allowed
@@ -820,6 +956,7 @@ Go constants include:
 ```go
 http.StatusOK
 http.StatusCreated
+http.StatusNoContent
 http.StatusBadRequest
 http.StatusNotFound
 http.StatusMethodNotAllowed
@@ -827,9 +964,9 @@ http.StatusMethodNotAllowed
 
 ---
 
-# Full Request Lifecycle
+# Full Request Lifecycles
 
-A `GET /tasks/2` request now follows:
+## `GET /tasks/2`
 
 ```text
 curl
@@ -859,7 +996,7 @@ logging
 HTTP response
 ```
 
-For `POST /tasks`:
+## `POST /tasks`
 
 ```text
 curl
@@ -889,6 +1026,36 @@ logging
 response
 ```
 
+## `DELETE /tasks/2`
+
+```text
+curl
+↓
+DELETE /tasks/2
+↓
+requestIDMiddleware
+↓
+loggingMiddleware
+↓
+ServeMux
+↓
+DELETE /tasks/{id}
+↓
+deleteTaskHandler
+↓
+PathValue("id")
+↓
+find matching task
+↓
+remove task from slice
+↓
+204 No Content
+↓
+logging
+↓
+response
+```
+
 ---
 
 # Concepts Practiced
@@ -900,6 +1067,9 @@ net/http
 ServeMux
 Go 1.22 routing
 HTTP methods
+GET
+POST
+DELETE
 path parameters
 Request.PathValue()
 encoding/json
@@ -908,6 +1078,8 @@ JSON Encoder
 validation
 HTTP status codes
 structured errors
+in-memory CRUD-style operations
+slice deletion
 http.Handler
 http.HandlerFunc
 middleware
@@ -959,6 +1131,17 @@ logging
 status tracking
 ↓
 request duration
+
+Step 5
+In-memory API expansion
+↓
+DELETE /tasks/{id}
+↓
+5 endpoints
+↓
+204 No Content
+↓
+slice deletion
 ```
 
 ---
@@ -971,10 +1154,10 @@ Current limitations:
 
 - Tasks are stored only in memory.
 - Data disappears when the server restarts.
-- There is no database integration yet.
+- PostgreSQL is not connected to the Go API yet.
 - The global task slice has no concurrency protection.
 - There is no authentication.
-- There are no update or delete endpoints.
+- There is no update endpoint such as `PUT` or `PATCH`.
 - There are no automated HTTP handler tests yet.
 - Request IDs are locally generated rather than using a distributed tracing system.
 
@@ -991,7 +1174,7 @@ METHOD + PATH
 → Handler
 ```
 
-Example:
+Examples:
 
 ```text
 GET /tasks
@@ -1002,6 +1185,9 @@ POST /tasks
 
 GET /tasks/{id}
 → getTaskHandler
+
+DELETE /tasks/{id}
+→ deleteTaskHandler
 ```
 
 ## JSON
@@ -1010,6 +1196,19 @@ GET /tasks/{id}
 Decoder = JSON → Go
 
 Encoder = Go → JSON
+```
+
+## In-Memory API
+
+```text
+GET
+→ read
+
+POST
+→ create
+
+DELETE
+→ remove
 ```
 
 ## Middleware
@@ -1052,4 +1251,4 @@ response
 
 The main idea to remember is:
 
-> Middleware is reusable logic that wraps HTTP handlers and runs before and/or after the actual handler.
+> Middleware handles reusable request-level concerns, while route handlers contain endpoint-specific application logic.
