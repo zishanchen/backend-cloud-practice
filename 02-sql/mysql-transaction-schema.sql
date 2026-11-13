@@ -1,0 +1,21 @@
+DROP TABLE IF EXISTS tx_audit_logs;
+DROP TABLE IF EXISTS tx_tasks;
+
+CREATE TABLE tx_tasks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255) NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'todo',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE tx_audit_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    task_id BIGINT NOT NULL,
+    old_status VARCHAR(32) NOT NULL,
+    new_status VARCHAR(32) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (task_id)
+        REFERENCES tx_tasks(id)
+        ON DELETE CASCADE
+);
