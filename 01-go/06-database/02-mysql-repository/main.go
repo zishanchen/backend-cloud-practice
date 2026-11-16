@@ -19,7 +19,10 @@ func main() {
 	defer db.Close()
 
 	repo := NewMySQLTaskRepository(db)
-	handler := NewTaskHandler(repo)
+
+	service := NewTaskService(repo)
+
+	handler := NewTaskHandler(service)
 
 	mux := http.NewServeMux()
 

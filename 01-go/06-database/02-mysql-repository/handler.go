@@ -3,20 +3,20 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 type TaskHandler struct {
-	repo TaskRepository
+	service TaskService
 }
 
 func NewTaskHandler(
-	repo TaskRepository,
+	service TaskService,
 ) *TaskHandler {
 	return &TaskHandler{
-		repo: repo,
+		service: service,
 	}
 }
 
@@ -24,10 +24,15 @@ func (h *TaskHandler) List(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-	tasks, err := h.repo.List(
+	tasks, err := h.service.List(
 		r.Context(),
 	)
 	if err != nil {
+		log.Printf(
+			"list tasks failed: %v",
+			err,
+		)
+
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -63,12 +68,15 @@ func (h *TaskHandler) Get(
 		return
 	}
 
-	task, err := h.repo.Get(
+	task, err := h.service.Get(
 		r.Context(),
 		id,
 	)
 
-	if errors.Is(err, ErrTaskNotFound) {
+	if errors.Is(
+		err,
+		ErrTaskNotFound,
+	) {
 		writeError(
 			w,
 			http.StatusNotFound,
@@ -78,6 +86,11 @@ func (h *TaskHandler) Get(
 	}
 
 	if err != nil {
+		log.Printf(
+			"get task failed: %v",
+			err,
+		)
+
 		writeError(
 			w,
 			http.StatusInternalServerError,
@@ -111,11 +124,15 @@ func (h *TaskHandler) Create(
 		return
 	}
 
-	input.Title = strings.TrimSpace(
-		input.Title,
+	task, err := h.service.Create(
+		r.Context(),
+		input,
 	)
 
-	if input.Title == "" {
+	if errors.Is(
+		err,
+		ErrTitleRequired,
+	) {
 		writeError(
 			w,
 			http.StatusBadRequest,
@@ -124,11 +141,12 @@ func (h *TaskHandler) Create(
 		return
 	}
 
-	task, err := h.repo.Create(
-		r.Context(),
-		input,
-	)
 	if err != nil {
+		log.Printf(
+			"create task failed: %v",
+			err,
+		)
+
 		writeError(
 			w,
 			http.StatusInternalServerError,
