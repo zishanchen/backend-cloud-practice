@@ -20,6 +20,12 @@ type fakeTaskRepository struct {
 	listFn func(
 		context.Context,
 	) ([]Task, error)
+
+	updateDoneFn func(
+		context.Context,
+		int64,
+		bool,
+	) (Task, error)
 }
 
 func (f *fakeTaskRepository) Create(
@@ -371,4 +377,20 @@ func TestTaskServiceList(
 			},
 		)
 	}
+}
+
+func (f *fakeTaskRepository) UpdateDone(
+	ctx context.Context,
+	id int64,
+	done bool,
+) (Task, error) {
+	if f.updateDoneFn != nil {
+		return f.updateDoneFn(
+			ctx,
+			id,
+			done,
+		)
+	}
+
+	return Task{}, nil
 }

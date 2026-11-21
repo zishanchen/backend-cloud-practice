@@ -8,7 +8,10 @@ import (
 	"log"
 )
 
-var ErrTaskNotFound = errors.New("task not found")
+var (
+	ErrTaskNotFound = errors.New("task not found")
+	ErrTaskConflict = errors.New("task state conflict")
+)
 
 type TaskRepository interface {
 	Create(
@@ -24,6 +27,12 @@ type TaskRepository interface {
 	List(
 		ctx context.Context,
 	) ([]Task, error)
+
+	UpdateDone(
+		ctx context.Context,
+		id int64,
+		done bool,
+	) (Task, error)
 }
 
 type MySQLTaskRepository struct {
@@ -161,4 +170,106 @@ func (r *MySQLTaskRepository) List(
 	}
 
 	return tasks, nil
+}
+
+func (r *MySQLTaskRepository) UpdateDone(
+	ctx context.Context,
+	id int64,
+	done bool,
+) (Task, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, fmt.Errorf(
+			"begin update transaction: %w",
+			err,
+		)
+	}
+
+	defer tx.Rollback()
+
+	var task Task
+
+	err = tx.QueryRowContext(
+		ctx,
+		`
+			SELECT
+				id,
+				title,
+				done
+			FROM api_tasks
+			WHERE id = ?
+			FOR UPDATE
+		`,
+		id,
+	).Scan(
+		&task.ID,
+		&task.Title,
+		&task.Done,
+	)
+
+	if errors.Is(err, sql.ErrNoRows) {
+		return Task{}, ErrTaskNotFound
+	}
+
+	if err != nil {
+		return Task{}, fmt.Errorf(
+			"read task for update: %w",
+			err,
+		)
+	}
+
+	if task.Done == done {
+		return Task{}, ErrTaskConflict
+	}
+
+	oldDone := task.Done
+
+	_, err = tx.ExecContext(
+		ctx,
+		`
+			UPDATE api_tasks
+			SET done = ?
+			WHERE id = ?
+		`,
+		done,
+		id,
+	)
+	if err != nil {
+		return Task{}, fmt.Errorf(
+			"update task state: %w",
+			err,
+		)
+	}
+
+	_, err = tx.ExecContext(
+		ctx,
+		`
+			INSERT INTO api_task_audit_logs (
+				task_id,
+				old_done,
+				new_done
+			)
+			VALUES (?, ?, ?)
+		`,
+		id,
+		oldDone,
+		done,
+	)
+	if err != nil {
+		return Task{}, fmt.Errorf(
+			"insert task audit log: %w",
+			err,
+		)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Task{}, fmt.Errorf(
+			"commit update transaction: %w",
+			err,
+		)
+	}
+
+	task.Done = done
+
+	return task, nil
 }

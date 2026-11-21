@@ -190,3 +190,90 @@ func writeError(
 		},
 	)
 }
+
+func (h *TaskHandler) UpdateDone(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	idText := r.PathValue("id")
+
+	id, err := strconv.ParseInt(
+		idText,
+		10,
+		64,
+	)
+	if err != nil || id <= 0 {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"invalid task id",
+		)
+		return
+	}
+
+	var input UpdateTaskDoneRequest
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&input); err != nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"invalid JSON",
+		)
+		return
+	}
+
+	if input.Done == nil {
+		writeError(
+			w,
+			http.StatusBadRequest,
+			"done is required",
+		)
+		return
+	}
+
+	task, err := h.service.UpdateDone(
+		r.Context(),
+		id,
+		*input.Done,
+	)
+
+	switch {
+	case errors.Is(err, ErrTaskNotFound):
+		writeError(
+			w,
+			http.StatusNotFound,
+			"task not found",
+		)
+		return
+
+	case errors.Is(err, ErrTaskConflict):
+		writeError(
+			w,
+			http.StatusConflict,
+			"task already has the requested state",
+		)
+		return
+
+	case err != nil:
+		log.Printf(
+			"update task failed: %v",
+			err,
+		)
+
+		writeError(
+			w,
+			http.StatusInternalServerError,
+			"failed to update task",
+		)
+		return
+	}
+
+	writeJSON(
+		w,
+		http.StatusOK,
+		task,
+	)
+}

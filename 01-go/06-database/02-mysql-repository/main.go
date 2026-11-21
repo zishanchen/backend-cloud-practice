@@ -41,6 +41,11 @@ func main() {
 		handler.Create,
 	)
 
+	mux.HandleFunc(
+		"PATCH /tasks/{id}/done",
+		handler.UpdateDone,
+	)
+
 	server := &http.Server{
 		Addr:              ":8081",
 		Handler:           mux,

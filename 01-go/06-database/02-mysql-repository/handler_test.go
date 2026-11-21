@@ -24,6 +24,12 @@ type fakeTaskService struct {
 	listFn func(
 		context.Context,
 	) ([]Task, error)
+
+	updateDoneFn func(
+		context.Context,
+		int64,
+		bool,
+	) (Task, error)
 }
 
 func (f *fakeTaskService) Create(
@@ -62,6 +68,22 @@ func (f *fakeTaskService) List(
 	}
 
 	return nil, nil
+}
+
+func (f *fakeTaskService) UpdateDone(
+	ctx context.Context,
+	id int64,
+	done bool,
+) (Task, error) {
+	if f.updateDoneFn != nil {
+		return f.updateDoneFn(
+			ctx,
+			id,
+			done,
+		)
+	}
+
+	return Task{}, nil
 }
 
 func TestTaskHandlerCreate(
@@ -409,6 +431,135 @@ func TestTaskHandlerList(
 						"expected body to contain %q, got %q",
 						tc.wantBodyContains,
 						response.Body.String(),
+					)
+				}
+			},
+		)
+	}
+}
+
+func TestTaskHandlerUpdateDone(
+	t *testing.T,
+) {
+	internalErr := errors.New(
+		"database unavailable",
+	)
+
+	tests := []struct {
+		name             string
+		id               string
+		body             string
+		serviceTask      Task
+		serviceErr       error
+		wantStatus       int
+		wantBodyContains string
+	}{
+		{
+			name: "success",
+			id:   "1",
+			body: `{"done":true}`,
+			serviceTask: Task{
+				ID:    1,
+				Title: "Learn Go",
+				Done:  true,
+			},
+			wantStatus:       http.StatusOK,
+			wantBodyContains: `"done":true`,
+		},
+		{
+			name:             "bad request",
+			id:               "abc",
+			body:             `{"done":true}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: `"error":"invalid task id"`,
+		},
+		{
+			name:             "not found",
+			id:               "999",
+			body:             `{"done":true}`,
+			serviceErr:       ErrTaskNotFound,
+			wantStatus:       http.StatusNotFound,
+			wantBodyContains: `"error":"task not found"`,
+		},
+		{
+			name:             "conflict",
+			id:               "1",
+			body:             `{"done":true}`,
+			serviceErr:       ErrTaskConflict,
+			wantStatus:       http.StatusConflict,
+			wantBodyContains: `"error":"task already has the requested state"`,
+		},
+		{
+			name:             "internal error",
+			id:               "1",
+			body:             `{"done":true}`,
+			serviceErr:       internalErr,
+			wantStatus:       http.StatusInternalServerError,
+			wantBodyContains: `"error":"failed to update task"`,
+		},
+		{
+			name:             "missing done",
+			id:               "1",
+			body:             `{}`,
+			wantStatus:       http.StatusBadRequest,
+			wantBodyContains: `"error":"done is required"`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(
+			tc.name,
+			func(t *testing.T) {
+				service := &fakeTaskService{
+					updateDoneFn: func(
+						context.Context,
+						int64,
+						bool,
+					) (Task, error) {
+						return tc.serviceTask,
+							tc.serviceErr
+					},
+				}
+
+				handler :=
+					NewTaskHandler(service)
+
+				req :=
+					httptest.NewRequest(
+						http.MethodPatch,
+						"/tasks/"+tc.id+"/done",
+						strings.NewReader(tc.body),
+					)
+
+				req.SetPathValue(
+					"id",
+					tc.id,
+				)
+
+				rec :=
+					httptest.NewRecorder()
+
+				handler.UpdateDone(
+					rec,
+					req,
+				)
+
+				if rec.Code != tc.wantStatus {
+					t.Fatalf(
+						"expected status %d, got %d",
+						tc.wantStatus,
+						rec.Code,
+					)
+				}
+
+				if !strings.Contains(
+					rec.Body.String(),
+					tc.wantBodyContains,
+				) {
+					t.Fatalf(
+						"expected body to contain %q, got %q",
+						tc.wantBodyContains,
+						rec.Body.String(),
 					)
 				}
 			},

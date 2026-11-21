@@ -22,6 +22,12 @@ type TaskService interface {
 	List(
 		ctx context.Context,
 	) ([]Task, error)
+
+	UpdateDone(
+		ctx context.Context,
+		id int64,
+		done bool,
+	) (Task, error)
 }
 
 type taskService struct {
@@ -66,4 +72,16 @@ func (s *taskService) List(
 	ctx context.Context,
 ) ([]Task, error) {
 	return s.repo.List(ctx)
+}
+
+func (s *taskService) UpdateDone(
+	ctx context.Context,
+	id int64,
+	done bool,
+) (Task, error) {
+	return s.repo.UpdateDone(
+		ctx,
+		id,
+		done,
+	)
 }

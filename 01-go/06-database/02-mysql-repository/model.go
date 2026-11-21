@@ -11,6 +11,10 @@ type CreateTaskRequest struct {
 	Done  bool   `json:"done"`
 }
 
+type UpdateTaskDoneRequest struct {
+	Done *bool `json:"done"`
+}
+
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
