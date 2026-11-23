@@ -25,3 +25,6 @@
 # Go test coverage
 coverage.out
 *.cover
+
+# Build artifacts
+bin/
