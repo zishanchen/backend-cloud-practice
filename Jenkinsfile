@@ -1,21 +1,11 @@
 pipeline {
     agent any
 
-    /*
-     * Declarative Pipeline normally performs an automatic
-     * SCM checkout.
-     *
-     * We disable it here because this exercise explicitly
-     * practices "checkout scm" in its own stage.
-     */
     options {
+        // We explicitly practice checkout scm below.
         skipDefaultCheckout()
     }
 
-    /*
-     * Global environment variables.
-     * These are available to all stages.
-     */
     environment {
         APP_NAME = 'task-api'
         BUILD_DIR = 'bin'
@@ -27,7 +17,21 @@ pipeline {
             steps {
                 echo 'Checking out source code...'
 
+                /*
+                 * In a Multibranch Pipeline, checkout scm
+                 * checks out the revision that belongs to
+                 * the current branch / pull request.
+                 */
                 checkout scm
+            }
+        }
+
+        stage('Branch Context') {
+            steps {
+                script {
+                    echo "Branch: ${env.BRANCH_NAME ?: 'not-multibranch'}"
+                    echo "Change Request: ${env.CHANGE_ID ?: 'none'}"
+                }
             }
         }
 
@@ -67,29 +71,40 @@ pipeline {
             }
         }
 
-        /*
-         * "when" controls whether this stage executes.
-         *
-         * RUN_EXTRA_CHECKS is defined in the global
-         * environment block above.
-         */
         stage('Extra Checks') {
             when {
-                environment name: 'RUN_EXTRA_CHECKS', value: 'true'
+                environment(
+                    name: 'RUN_EXTRA_CHECKS',
+                    value: 'true'
+                )
             }
 
             steps {
-                echo 'RUN_EXTRA_CHECKS=true, running go vet...'
+                echo 'Running go vet...'
 
                 sh 'go vet ./...'
             }
         }
 
+        /*
+         * Example of branch-based conditional execution.
+         *
+         * In a Multibranch Pipeline, BRANCH_NAME is
+         * provided by Jenkins.
+         */
+        stage('Main Branch Check') {
+            when {
+                branch 'main'
+            }
+
+            steps {
+                echo 'Running checks specific to the main branch...'
+
+                sh 'go test ./...'
+            }
+        }
+
         stage('Build') {
-            /*
-             * Stage-level environment variable.
-             * CGO_ENABLED only applies to this stage.
-             */
             environment {
                 CGO_ENABLED = '0'
             }
@@ -110,9 +125,6 @@ pipeline {
         }
     }
 
-    /*
-     * post runs after the Pipeline finishes.
-     */
     post {
         always {
             echo 'Pipeline finished.'
